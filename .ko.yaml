@@ -1,0 +1,13 @@
+defaultBaseImage: gcr.io/distroless/static:nonroot
+
+builds:
+- id: environments-ui
+  main: .
+  env:
+  - CGO_ENABLED=0
+  ldflags:
+  - -s
+  - -w
+  platforms:
+  - linux/amd64
+  - linux/arm64
