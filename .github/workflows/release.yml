@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  release:
+    name: Release
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Set up ko
+        uses: ko-build/setup-ko@v0.6
+        with:
+          version: v0.17
+
+      - name: Login to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish with ko
+        env:
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/environments-server
+          KO_DEFAULTBASEIMAGE: gcr.io/distroless/static:nonroot
+        run: |
+          ko publish --platform=linux/amd64,linux/arm64 \
+            --bare \
+            --tags ${{ github.ref_name }} \
+            .
+
+      - name: Generate changelog
+        run: |
+          git fetch --tags --force
+          PREV_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -2 | tail -1 || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty=format:'- %s (%an)' $PREV_TAG..HEAD > CHANGELOG.md
+          else
+            git log --pretty=format:'- %s (%an)' > CHANGELOG.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

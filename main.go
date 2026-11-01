@@ -1,3 +1,18 @@
+/*
+Copyright 2026 The BlanketOps Authors.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 import (
@@ -7,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	environmentsv1alpha1 "github.com/ntlaletsi70/blanketops-environments-api/api/environments/v1alpha1"
@@ -59,7 +75,7 @@ func main() {
 		slog.Info("serving ui", "dir", dir)
 	}
 
-	slog.Info("blanketops server", "addr", ":"+port, "k8s", k8sClient != nil)
+	slog.Info("blanketops environments server", "addr", ":"+port, "k8s", k8sClient != nil)
 	if err := http.ListenAndServe(":"+port, cors(mux)); err != nil {
 		slog.Error("server error", "err", err)
 		os.Exit(1)
@@ -532,4 +548,34 @@ func mergeMeta(meta *metav1.ObjectMeta, patch *types.PatchMetadata) {
 			meta.Annotations[k] = v
 		}
 	}
+}
+
+func uiDir() string {
+	dirs := []string{
+		"/kodata/ui",
+		"./ui",
+		"../environments-ui/dist",
+		"/app/ui",
+	}
+	for _, d := range dirs {
+		if _, err := os.Stat(d); err == nil {
+			return d
+		}
+	}
+	return ""
+}
+
+func uiHandler(dir string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		if path == "/" || path == "" {
+			path = "/index.html"
+		}
+		full := filepath.Join(dir, path)
+		if _, err := os.Stat(full); err == nil {
+			http.ServeFile(w, r, full)
+			return
+		}
+		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+	})
 }
