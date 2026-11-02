@@ -1,35 +1,50 @@
 //go:build js && wasm
 
+/*
+Copyright 2026 The BlanketOps Authors.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 // Package main is the WASM entry point for the BlanketOps stub store.
 // Build with:
 //
-//	GOOS=js GOARCH=wasm go build -o blanketops.wasm ./wasm/
+//	GOOS=js GOARCH=wasm go build -o blanketops.environments.wasm ./wasm/
 //
 // The module registers a global `blanketops` object with the following API.
 // All functions return a JSON string — parse with JSON.parse() on the JS side.
 //
-//	blanketops.list(kind, namespace?)            → ListResponse | APIError
-//	blanketops.get(kind, namespace, name)        → CRStatus     | APIError
-//	blanketops.create(kind, namespace, bodyJSON) → CRStatus     | APIError
-//	blanketops.patch(kind, ns, name, bodyJSON)   → CRStatus     | APIError
-//	blanketops.delete(kind, namespace, name)     → DeleteResponse | APIError
-//	blanketops.events(kind, namespace, name)     → CREvent[]    | APIError
-//	blanketops.debug(kind, namespace, name)      → DebugInfo    | APIError
+//	blanketops.environments.list(kind, namespace?)            → ListResponse | APIError
+//	blanketops.environments.get(kind, namespace, name)        → CRStatus     | APIError
+//	blanketops.environments.create(kind, namespace, bodyJSON) → CRStatus     | APIError
+//	blanketops.environments.patch(kind, ns, name, bodyJSON)   → CRStatus     | APIError
+//	blanketops.environments.delete(kind, namespace, name)     → DeleteResponse | APIError
+//	blanketops.environments.events(kind, namespace, name)     → CREvent[]    | APIError
+//	blanketops.environments.debug(kind, namespace, name)      → DebugInfo    | APIError
 package main
 
 import (
 	"encoding/json"
 	"syscall/js"
 
-	"github.com/blanketops/environments-server/internal/store"
-	"github.com/blanketops/environments-server/internal/types"
+	"github.com/blanketops/environments-server/pkg/store"
+	"github.com/blanketops/environments-server/pkg/types"
 )
 
 var db = store.NewSeeded()
 
 func main() {
 	api := js.ValueOf(map[string]any{})
-	js.Global().Set("blanketops", api)
+	js.Global().Set("blanketops-environments-server", api)
 
 	api.Set("list", js.FuncOf(wasmList))
 	api.Set("get", js.FuncOf(wasmGet))
@@ -62,7 +77,7 @@ func arg(args []js.Value, i int) string {
 
 // ── exported functions ────────────────────────────────────────────────────
 
-// blanketops.list(kind, namespace?) → JSON
+// blanketops.environments.list(kind, namespace?) → JSON
 func wasmList(_ js.Value, args []js.Value) any {
 	if len(args) < 1 {
 		return apiErr("kind required", "BadRequest", 400)
@@ -77,7 +92,7 @@ func wasmList(_ js.Value, args []js.Value) any {
 	return toJSON(types.ListResponse{Items: items, ResourceVersion: "wasm-rv", Total: len(items)})
 }
 
-// blanketops.get(kind, namespace, name) → JSON
+// blanketops.environments.get(kind, namespace, name) → JSON
 func wasmGet(_ js.Value, args []js.Value) any {
 	if len(args) < 3 {
 		return apiErr("kind, namespace, name required", "BadRequest", 400)
@@ -89,7 +104,7 @@ func wasmGet(_ js.Value, args []js.Value) any {
 	return toJSON(cr)
 }
 
-// blanketops.create(kind, namespace, bodyJSON) → JSON
+// blanketops.environments.create(kind, namespace, bodyJSON) → JSON
 func wasmCreate(_ js.Value, args []js.Value) any {
 	if len(args) < 3 {
 		return apiErr("kind, namespace, bodyJSON required", "BadRequest", 400)
@@ -105,7 +120,7 @@ func wasmCreate(_ js.Value, args []js.Value) any {
 	return toJSON(cr)
 }
 
-// blanketops.patch(kind, namespace, name, bodyJSON) → JSON
+// blanketops.environments.patch(kind, namespace, name, bodyJSON) → JSON
 func wasmPatch(_ js.Value, args []js.Value) any {
 	if len(args) < 4 {
 		return apiErr("kind, namespace, name, bodyJSON required", "BadRequest", 400)
@@ -121,7 +136,7 @@ func wasmPatch(_ js.Value, args []js.Value) any {
 	return toJSON(cr)
 }
 
-// blanketops.delete(kind, namespace, name) → JSON
+// blanketops.environments.delete(kind, namespace, name) → JSON
 func wasmDelete(_ js.Value, args []js.Value) any {
 	if len(args) < 3 {
 		return apiErr("kind, namespace, name required", "BadRequest", 400)
@@ -133,7 +148,7 @@ func wasmDelete(_ js.Value, args []js.Value) any {
 	return toJSON(resp)
 }
 
-// blanketops.events(kind, namespace, name) → JSON
+// blanketops.environments.events(kind, namespace, name) → JSON
 func wasmEvents(_ js.Value, args []js.Value) any {
 	if len(args) < 3 {
 		return apiErr("kind, namespace, name required", "BadRequest", 400)
@@ -149,7 +164,7 @@ func wasmEvents(_ js.Value, args []js.Value) any {
 	return toJSON(events)
 }
 
-// blanketops.debug(kind, namespace, name) → JSON
+// blanketops.environments.debug(kind, namespace, name) → JSON
 func wasmDebug(_ js.Value, args []js.Value) any {
 	if len(args) < 3 {
 		return apiErr("kind, namespace, name required", "BadRequest", 400)
