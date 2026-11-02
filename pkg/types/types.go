@@ -76,7 +76,7 @@ type CRStatus struct {
 	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
-// ── API response types ────────────────────────────────────────────────────
+// ─── API response types ────────────────────────────────────────────────────
 
 type ListResponse struct {
 	Items           []CRStatus `json:"items"`
@@ -98,7 +98,7 @@ type APIError struct {
 	Code    int    `json:"code"`
 }
 
-// ── Request body types ────────────────────────────────────────────────────
+// ─── Request body types ────────────────────────────────────────────────────
 
 type CreateBody struct {
 	Metadata CreateMetadata  `json:"metadata"`

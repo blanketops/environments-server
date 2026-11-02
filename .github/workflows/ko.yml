@@ -53,7 +53,7 @@ env:
 
 jobs:
   build-and-publish:
-    # Zenith self-hosted pool.
+    #  self-hosted pool.
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
@@ -69,7 +69,7 @@ jobs:
           cache: false
 
       # ko, cosign (2.4.1) and oras are baked into the runner image
-      # (zenith-runner-toolchain 1.0.11+); installing them per job meant
+      # (-runner-toolchain 1.0.11+); installing them per job meant
       # fresh downloads over a slow link. GHCR login is the step below.
       - name: Check baked tools
         run: |

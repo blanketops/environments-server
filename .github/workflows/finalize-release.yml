@@ -56,7 +56,7 @@ permissions:
   contents: write
 jobs:
   finalize:
-    # Zenith self-hosted pool.
+    #  self-hosted pool.
     runs-on: self-hosted
     env:
       VERSION: ${{ github.event.inputs.version }}
@@ -152,7 +152,7 @@ jobs:
           git fetch --quiet origin main
           git checkout --quiet --detach origin/main
 
-      # git-cliff is baked into the runner image (zenith-runner-toolchain).
+      # git-cliff is baked into the runner image (-runner-toolchain).
       - name: git-cliff version
         run: git-cliff --version
 

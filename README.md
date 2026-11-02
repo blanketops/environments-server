@@ -1,4 +1,4 @@
-# environments-server
+# BlanketOps Environments HTTP Handler
 
 REST API server for BlanketOps Environments — serves the Kubernetes API and embedded UI from a single binary.
 
@@ -19,7 +19,7 @@ The environments-server provides a unified HTTP API for managing BlanketOps Envi
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    environments-server                         │
+│               environments-http-handler                     │
 ├─────────────────────────────────────────────────────────────┤
 │  GET  /health              → k8s connectivity check          │
 │  GET  /api/v1/{kind}       → List resources (with ?namespace=)│
@@ -76,9 +76,9 @@ ko publish --platform=linux/amd64,linux/arm64 .
 
 ## Configuration
 
-| Env Var | Default | Description |
-|---------|---------|-------------|
-| `PORT` | `8082` | HTTP listen port |
+| Env Var        | Default            | Description        |
+| -------------- | ------------------ | ------------------ |
+| `PORT`       | `8082`           | HTTP listen port   |
 | `KUBECONFIG` | `~/.kube/config` | Path to kubeconfig |
 
 ## API Examples
@@ -133,7 +133,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: environments-server
-  namespace: blanketops-system
+  namespace: blanketops-environments-system
 spec:
   replicas: 2
   selector:
@@ -241,6 +241,7 @@ npm run dev -- --port 5173
 ## CI/CD
 
 See `.github/workflows/` for:
+
 - **ci.yml** — Go test, vet, build on PR/push
 - **release.yml** — ko publish on tag push
 - **docker.yml** — Alternative Docker build

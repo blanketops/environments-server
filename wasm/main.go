@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 /*
 Copyright 2026 The BlanketOps Authors.
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,8 +14,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-//go:build js && wasm
 
 // Package main is the WASM entry point for the BlanketOps stub store.
 // Build with:
@@ -36,15 +36,15 @@ import (
 	"encoding/json"
 	"syscall/js"
 
-	"github.com/blanketops/environments-server/internal/store"
-	"github.com/blanketops/environments-server/internal/types"
+	"github.com/blanketops/environments-server/pkg/store"
+	"github.com/blanketops/environments-server/pkg/types"
 )
 
 var db = store.NewSeeded()
 
 func main() {
 	api := js.ValueOf(map[string]any{})
-	js.Global().Set("blanketops", api)
+	js.Global().Set("blanketops-environments-server", api)
 
 	api.Set("list", js.FuncOf(wasmList))
 	api.Set("get", js.FuncOf(wasmGet))
