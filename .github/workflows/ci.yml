@@ -1,5 +1,16 @@
+# =============================================================================
+# ci.yml — CI: Test, Lint, Build
+#
+# Three-job pipeline: test (go test with race detector + vet), lint
+# (golangci-lint), and build binary. Runs on pushes to main and on pull
+# requests targeting main. The build job only runs on push to main.
+#
+# Trigger scope:
+#   push to main; pull_request to main
+#
+# Secrets required: none
+# =============================================================================
 name: CI
-
 on:
   push:
     branches: [main]
