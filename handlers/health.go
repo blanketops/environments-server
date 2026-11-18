@@ -22,7 +22,7 @@ import (
 	"github.com/blanketops/environments-server/pkg/store"
 )
 
-func SetupRoutes(s *store.K8sStore) *http.ServeMux {
+func SetupRoutes(s store.Store) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", HandleHealth())
@@ -58,7 +58,7 @@ func HandleHealth() http.HandlerFunc {
 	}
 }
 
-func HandleEvents(s *store.K8sStore) http.HandlerFunc {
+func HandleEvents(s store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		kind := r.PathValue("kind")
 		ns := r.PathValue("ns")
@@ -79,7 +79,7 @@ func HandleEvents(s *store.K8sStore) http.HandlerFunc {
 	}
 }
 
-func HandleDebug(s *store.K8sStore) http.HandlerFunc {
+func HandleDebug(s store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		kind := r.PathValue("kind")
 		ns := r.PathValue("ns")

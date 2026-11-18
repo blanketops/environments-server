@@ -40,10 +40,21 @@ func main() {
 		}
 	}
 
-	s, err := store.NewK8sStore(config)
-	if err != nil {
-		slog.Error("failed to create k8s store", "err", err)
-		os.Exit(1)
+	var s store.Store
+	if os.Getenv("MOCK") == "1" || os.Getenv("ENVIRONMENTS_MOCK") == "1" {
+		s, err = store.NewMockStore()
+		if err != nil {
+			slog.Error("failed to create mock store", "err", err)
+			os.Exit(1)
+		}
+		slog.Info("environments server running in mock mode (no cluster required)")
+	} else {
+		k8s, err := store.NewK8sStore(config)
+		if err != nil {
+			slog.Error("failed to create k8s store", "err", err)
+			os.Exit(1)
+		}
+		s = k8s
 	}
 
 	mux := handlers.SetupRoutes(s)

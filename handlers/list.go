@@ -9,7 +9,7 @@ import (
 	"github.com/blanketops/environments-server/pkg/types"
 )
 
-func HandleList(s *store.K8sStore) http.HandlerFunc {
+func HandleList(s store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		kind := r.PathValue("kind")
 		ns := r.URL.Query().Get("namespace")

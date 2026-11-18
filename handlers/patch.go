@@ -22,7 +22,7 @@ import (
 	"github.com/blanketops/environments-server/pkg/types"
 )
 
-func HandlePatch(s *store.K8sStore) http.HandlerFunc {
+func HandlePatch(s store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		kind := r.PathValue("kind")
 		ns := r.PathValue("ns")

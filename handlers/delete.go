@@ -23,7 +23,7 @@ import (
 	"github.com/blanketops/environments-server/pkg/store"
 )
 
-func HandleDelete(s *store.K8sStore) http.HandlerFunc {
+func HandleDelete(s store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		kind := r.PathValue("kind")
 		ns := r.PathValue("ns")
