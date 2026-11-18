@@ -178,7 +178,7 @@ func (m *MockStore) GetEvents(kind, namespace, name string) ([]types.CREvent, er
 func (m *MockStore) seed() error {
 	now := time.Now().UTC().Format(time.RFC3339)
 
-	add := func(kind, name, ns, phase string, spec map[string]interface{}, labels map[string]string) error {
+	add := func(kind, name, ns, phase string, conditions []types.Condition, spec map[string]interface{}, labels map[string]string) error {
 		specBytes, err := json.Marshal(spec)
 		if err != nil {
 			return err
@@ -189,9 +189,7 @@ func (m *MockStore) seed() error {
 			Kind:        kind,
 			Phase:       phase,
 			Generation:  1,
-			Conditions: []types.Condition{
-				{Type: "Ready", Status: "True", Reason: "Reconciled", Message: kind + " reconciled", LastTransitionTime: now},
-			},
+			Conditions:  conditions,
 			Events: []types.CREvent{
 				{Type: "Normal", Reason: "Created", Message: kind + " created", Count: 1, FirstTime: now, LastTime: now},
 			},
@@ -201,6 +199,28 @@ func (m *MockStore) seed() error {
 		}
 		m.data[m.key(kind, ns, name)] = &item
 		return nil
+	}
+
+	// Real controller condition types, mirroring environments-controller
+	// internal/controller/observers/environment/environment.go:
+	//   Build.<name>.Ready      (BuildSuccess=True → true)
+	//   GitRepository.<name>.Ready  (Ready=True → true)
+	//   Deployment.<name>.Ready     (Ready=True → true)
+	//   Route.<name>.Ready          (Ready=True → true)
+	//   Package.<name>.Ready        (Succeeded=True → true)
+	//   ServiceUnit.<name>.Ready    (ServiceUnitReady=True → true)
+	envCondition := func(ready bool, kind, name, msg string) types.Condition {
+		status := "False"
+		if ready {
+			status = "True"
+		}
+		return types.Condition{
+			Type:               kind + "." + name + ".Ready",
+			Status:             status,
+			Reason:             kind,
+			Message:            msg,
+			LastTransitionTime: now,
+		}
 	}
 
 	contract := func(appName, envType, version, branch, gitOwner, provider string, vault ...map[string]interface{}) map[string]interface{} {
@@ -221,11 +241,20 @@ func (m *MockStore) seed() error {
 	// ── Environments ──
 	envs := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
-			name: "env-production", ns: "blanketops-environments", phase: "Ready",
+			name: "env-production", ns: "blanketops-environments", phase: "ENVIRONMENT_PHASE_READY",
+			conditions: []types.Condition{
+				envCondition(true, "Build", "build-payment-api", "Build applied successfully"),
+				envCondition(true, "GitRepository", "payment-api-repo", "Repository ready"),
+				envCondition(true, "Deployment", "deploy-payment-api", "Deployment rolled out"),
+				envCondition(true, "Route", "route-payment-api", "Route bound"),
+				envCondition(true, "Package", "pkg-cert-manager", "Package installed"),
+				envCondition(true, "ServiceUnit", "svc-payment-worker", "Service unit healthy"),
+			},
 			spec: contract("payment-api", "PRODUCTION", "2.1.0", "main", "blanketops", "vault",
 				map[string]interface{}{
 					"address":   "http://vault:8200",
@@ -237,23 +266,41 @@ func (m *MockStore) seed() error {
 			labels: map[string]string{"environments.blanketops.dev/name": "env-production", "environments.blanketops.dev/type": "production"},
 		},
 		{
-			name: "env-staging", ns: "blanketops-environments", phase: "Running",
+			name: "env-staging", ns: "blanketops-environments", phase: "ENVIRONMENT_PHASE_READY",
+			conditions: []types.Condition{
+				envCondition(true, "Build", "build-orders-api", "Build applied successfully"),
+				envCondition(true, "GitRepository", "orders-api-repo", "Repository ready"),
+				envCondition(true, "Deployment", "deploy-orders-api", "Deployment rolled out"),
+				envCondition(true, "Route", "route-orders-api", "Route bound"),
+				envCondition(true, "Package", "pkg-ingress-nginx", "Package installed"),
+				envCondition(true, "ServiceUnit", "svc-order-processor", "Service unit healthy"),
+			},
 			spec: contract("orders-api", "STAGING", "1.4.0", "develop", "blanketops", "aws"),
 			labels: map[string]string{"environments.blanketops.dev/name": "env-staging", "environments.blanketops.dev/type": "staging"},
 		},
 		{
-			name: "env-development", ns: "blanketops-environments", phase: "Pending",
+			name: "env-development", ns: "blanketops-environments", phase: "ENVIRONMENT_PHASE_PENDING",
+			conditions: []types.Condition{
+				envCondition(false, "Build", "build-frontend", "Build is not True"),
+				envCondition(false, "GitRepository", "", "no GitRepository condition"),
+				envCondition(true, "Deployment", "deploy-frontend", "Deployment rolled out"),
+			},
 			spec: contract("frontend", "DEVELOPMENT", "0.9.0", "feature/login", "blanketops", "local"),
 			labels: map[string]string{"environments.blanketops.dev/name": "env-development", "environments.blanketops.dev/type": "development"},
 		},
 		{
-			name: "env-testing", ns: "blanketops-environments", phase: "Failed",
+			name: "env-testing", ns: "blanketops-environments", phase: "ENVIRONMENT_PHASE_PENDING",
+			conditions: []types.Condition{
+				envCondition(false, "Build", "", "no BuildSuccess condition"),
+				envCondition(false, "GitRepository", "", "no GitRepository condition"),
+				envCondition(false, "Deployment", "", "no Deployment condition"),
+			},
 			spec: contract("auth-service", "TESTING", "0.3.0", "test/sso", "blanketops", "gcp"),
 			labels: map[string]string{"environments.blanketops.dev/name": "env-testing", "environments.blanketops.dev/type": "testing"},
 		},
 	}
 	for _, e := range envs {
-		if err := add("environments", e.name, e.ns, e.phase, e.spec, e.labels); err != nil {
+		if err := add("environments", e.name, e.ns, e.phase, e.conditions, e.spec, e.labels); err != nil {
 			return err
 		}
 	}
@@ -261,11 +308,15 @@ func (m *MockStore) seed() error {
 	// ── Builds ──
 	builds := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "build-payment-api", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "BuildSuccess", Status: "True", Reason: "BuildRunSucceeded", Message: "Build completed successfully", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/payment-api:2.1.0",
 				"source": map[string]interface{}{
@@ -288,6 +339,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "build-orders-api", ns: "blanketops-environments", phase: "Running",
+			conditions: []types.Condition{
+				{Type: "BuildSuccess", Status: "False", Reason: "BuildRunning", Message: "Build is in progress", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/orders-api:1.4.0",
 				"source": map[string]interface{}{
@@ -310,6 +364,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "build-frontend", ns: "blanketops-environments", phase: "Pending",
+			conditions: []types.Condition{
+				{Type: "BuildSuccess", Status: "False", Reason: "BuildPending", Message: "Build is not True", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/frontend:0.9.0",
 				"source": map[string]interface{}{
@@ -332,7 +389,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, b := range builds {
-		if err := add("builds", b.name, b.ns, b.phase, b.spec, b.labels); err != nil {
+		if err := add("builds", b.name, b.ns, b.phase, b.conditions, b.spec, b.labels); err != nil {
 			return err
 		}
 	}
@@ -340,11 +397,15 @@ func (m *MockStore) seed() error {
 	// ── Packages ──
 	pkgs := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "pkg-cert-manager", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Succeeded", Status: "True", Reason: "PackageInstalled", Message: "Package installed successfully", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/cert-manager:1.13.0",
 				"source": map[string]interface{}{
@@ -361,6 +422,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "pkg-ingress-nginx", ns: "blanketops-environments", phase: "Running",
+			conditions: []types.Condition{
+				{Type: "Succeeded", Status: "False", Reason: "PackageReconciling", Message: "Package is being installed", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/ingress-nginx:1.9.0",
 				"source": map[string]interface{}{
@@ -377,7 +441,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, p := range pkgs {
-		if err := add("packages", p.name, p.ns, p.phase, p.spec, p.labels); err != nil {
+		if err := add("packages", p.name, p.ns, p.phase, p.conditions, p.spec, p.labels); err != nil {
 			return err
 		}
 	}
@@ -385,11 +449,15 @@ func (m *MockStore) seed() error {
 	// ── ServiceUnits ──
 	sus := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "svc-payment-worker", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "ServiceUnitReady", Status: "True", Reason: "ServiceUnitHealthy", Message: "Service unit is healthy", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/payment-worker:2.1.0",
 				"replicas": 3,
@@ -405,6 +473,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "svc-order-processor", ns: "blanketops-environments", phase: "Running",
+			conditions: []types.Condition{
+				{Type: "ServiceUnitReady", Status: "False", Reason: "ServiceUnitReconciling", Message: "Service unit is reconciling", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/order-processor:1.4.0",
 				"replicas": 2,
@@ -420,7 +491,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, s := range sus {
-		if err := add("serviceunits", s.name, s.ns, s.phase, s.spec, s.labels); err != nil {
+		if err := add("serviceunits", s.name, s.ns, s.phase, s.conditions, s.spec, s.labels); err != nil {
 			return err
 		}
 	}
@@ -428,11 +499,15 @@ func (m *MockStore) seed() error {
 	// ── Deployments ──
 	deps := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "deploy-payment-api", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "DeploymentReady", Message: "Deployment rolled out", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/payment-api:2.1.0",
 				"replicas": 2,
@@ -443,6 +518,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "deploy-orders-api", ns: "blanketops-environments", phase: "Running",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "False", Reason: "DeploymentReconciling", Message: "Deployment is reconciling", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/orders-api:1.4.0",
 				"replicas": 3,
@@ -453,6 +531,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "deploy-frontend", ns: "blanketops-environments", phase: "Pending",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "False", Reason: "DeploymentPending", Message: "Deployment is pending", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"image": "ghcr.io/blanketops/frontend:0.9.0",
 				"replicas": 1,
@@ -463,7 +544,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, d := range deps {
-		if err := add("deployments", d.name, d.ns, d.phase, d.spec, d.labels); err != nil {
+		if err := add("deployments", d.name, d.ns, d.phase, d.conditions, d.spec, d.labels); err != nil {
 			return err
 		}
 	}
@@ -471,11 +552,15 @@ func (m *MockStore) seed() error {
 	// ── GitRepositories ──
 	grs := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "payment-api-repo", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "RepositoryReady", Message: "Repository ready", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"url": "https://github.com/blanketops/payment-api.git",
 				"revision": "main",
@@ -485,6 +570,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "orders-api-repo", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "RepositoryReady", Message: "Repository ready", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"url": "https://github.com/blanketops/orders-api.git",
 				"revision": "develop",
@@ -494,7 +582,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, g := range grs {
-		if err := add("gitrepositories", g.name, g.ns, g.phase, g.spec, g.labels); err != nil {
+		if err := add("gitrepositories", g.name, g.ns, g.phase, g.conditions, g.spec, g.labels); err != nil {
 			return err
 		}
 	}
@@ -502,11 +590,15 @@ func (m *MockStore) seed() error {
 	// ── GitHubEvents ──
 	ges := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "event-push-payment", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "EventProcessed", Message: "Push event processed", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"repository": "blanketops/payment-api",
 				"event":      "push",
@@ -516,6 +608,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "event-pull-orders", ns: "blanketops-environments", phase: "Running",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "False", Reason: "EventPending", Message: "Pull request event pending", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"repository": "blanketops/orders-api",
 				"event":      "pull_request",
@@ -525,7 +620,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, g := range ges {
-		if err := add("githubevents", g.name, g.ns, g.phase, g.spec, g.labels); err != nil {
+		if err := add("githubevents", g.name, g.ns, g.phase, g.conditions, g.spec, g.labels); err != nil {
 			return err
 		}
 	}
@@ -533,11 +628,15 @@ func (m *MockStore) seed() error {
 	// ── Routes ──
 	routes := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "route-payment-api", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "RouteBound", Message: "Route bound", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"path": "/api/payments",
 				"backend": "payment-api-service:8080",
@@ -547,6 +646,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "route-orders-api", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "RouteBound", Message: "Route bound", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"path": "/api/orders",
 				"backend": "orders-api-service:8080",
@@ -556,7 +658,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, r := range routes {
-		if err := add("routes", r.name, r.ns, r.phase, r.spec, r.labels); err != nil {
+		if err := add("routes", r.name, r.ns, r.phase, r.conditions, r.spec, r.labels); err != nil {
 			return err
 		}
 	}
@@ -564,11 +666,15 @@ func (m *MockStore) seed() error {
 	// ── Domains ──
 	doms := []struct {
 		name, ns, phase string
+		conditions      []types.Condition
 		spec            map[string]interface{}
 		labels          map[string]string
 	}{
 		{
 			name: "payments-dev-host", ns: "blanketops-environments", phase: "Ready",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "DomainReady", Message: "Domain ready", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"host": "payments.dev.blanketops.dev",
 				"tlsStrategy": "platform",
@@ -578,6 +684,9 @@ func (m *MockStore) seed() error {
 		},
 		{
 			name: "orders-dev-host", ns: "blanketops-environments", phase: "Provisioning",
+			conditions: []types.Condition{
+				{Type: "Ready", Status: "False", Reason: "DomainProvisioning", Message: "Domain is being provisioned", LastTransitionTime: now},
+			},
 			spec: map[string]interface{}{
 				"host": "orders.dev.blanketops.dev",
 				"tlsStrategy": "custom",
@@ -587,7 +696,7 @@ func (m *MockStore) seed() error {
 		},
 	}
 	for _, d := range doms {
-		if err := add("domains", d.name, d.ns, d.phase, d.spec, d.labels); err != nil {
+		if err := add("domains", d.name, d.ns, d.phase, d.conditions, d.spec, d.labels); err != nil {
 			return err
 		}
 	}
