@@ -25,7 +25,7 @@ import (
 func SetupRoutes(s store.Store) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /health", HandleHealth())
+	mux.HandleFunc("GET /health", HandleHealth(s))
 	mux.HandleFunc("GET /api/v1/{kind}/{ns}/{name}/events", HandleEvents(s))
 	mux.HandleFunc("GET /api/v1/{kind}/{ns}/{name}/debug", HandleDebug(s))
 	mux.HandleFunc("GET /api/v1/{kind}/{ns}/{name}", HandleGet(s))
@@ -50,9 +50,19 @@ func Cors(next http.Handler) http.Handler {
 	})
 }
 
-func HandleHealth() http.HandlerFunc {
+func HandleHealth(s store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Real connectivity check: try listing environments.
+		// If the store can't reach the backend (k8s or mock), report connected:false.
+		_, err := s.List("environments", "")
+		connected := err == nil
+
 		w.Header().Set("Content-Type", "application/json")
+		if !connected {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"status":"degraded","connected":false,"store":"kubernetes"}`))
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok","connected":true,"store":"kubernetes"}`))
 	}

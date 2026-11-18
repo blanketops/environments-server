@@ -1,0 +1,43 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: environments-server
+  namespace: blanketops-environments
+spec:
+  template:
+    spec:
+      containers:
+      - image: ghcr.io/blanketops/environments-server:latest
+        env:
+        - name: PORT
+          value: "8082"
+        - name: MOCK
+          value: "0"
+        - name: KUBECONFIG
+          value: "/root/.kube/config"
+        ports:
+        - containerPort: 8082
+          name: http1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 15
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3

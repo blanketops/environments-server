@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/blanketops/environments-server/handlers"
 	"github.com/blanketops/environments-server/pkg/store"
@@ -18,16 +22,13 @@ func main() {
 		port = "8082"
 	}
 
-	// Set log level to debug
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	var config *rest.Config
 	var err error
 
-	// Try in-cluster config first
 	config, err = rest.InClusterConfig()
 	if err != nil {
-		// Fall back to kubeconfig
 		kubeconfig := os.Getenv("KUBECONFIG")
 		if kubeconfig == "" {
 			home, _ := os.UserHomeDir()
@@ -59,9 +60,35 @@ func main() {
 
 	mux := handlers.SetupRoutes(s)
 
-	slog.Info("blanketops environments server", "addr", ":"+port)
-	if err := http.ListenAndServe(":"+port, handlers.Cors(mux)); err != nil {
-		slog.Error("server error", "err", err)
+	server := &http.Server{
+		Addr:              ":" + port,
+		Handler:           handlers.Cors(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
+	// Graceful shutdown on SIGTERM/SIGINT (Knative sends SIGTERM)
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+
+	go func() {
+		slog.Info("environments server listening", "addr", ":"+port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server error", "err", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-stop
+	slog.Info("shutting down server")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		slog.Error("server forced to shutdown", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("server exited")
 }

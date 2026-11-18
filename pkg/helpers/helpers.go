@@ -23,39 +23,6 @@ import (
 	"github.com/blanketops/environments-server/pkg/types"
 )
 
-var PlatformDependencies = []types.CRStatus{
-	{Name: "carvel", Namespace: "kapp-controller", Kind: "carvel", Phase: "Ready", Labels: map[string]string{"provider": "carvel"}, Annotations: map[string]string{"description": "Carvel Kapp Controller — packaging and lifecycle management"}},
-	{Name: "argoevents", Namespace: "argo-events", Kind: "argoevents", Phase: "Ready", Labels: map[string]string{"provider": "argoevents"}, Annotations: map[string]string{"description": "Argo Events — event-driven pipelines"}},
-	{Name: "tekton-pipelines", Namespace: "tekton-pipelines", Kind: "tekton-pipelines", Phase: "Ready", Labels: map[string]string{"provider": "tekton"}, Annotations: map[string]string{"description": "Tekton Pipelines — CI/CD execution engine"}},
-	{Name: "tekton-dashboard", Namespace: "tekton-pipelines", Kind: "tekton-dashboard", Phase: "Ready", Labels: map[string]string{"provider": "tekton"}, Annotations: map[string]string{"description": "Tekton Dashboard — pipeline UI"}},
-	{Name: "shipwright", Namespace: "shipwright-build", Kind: "shipwright", Phase: "Ready", Labels: map[string]string{"provider": "shipwright"}, Annotations: map[string]string{"description": "Shipwright Build — Kubernetes-native image builds"}},
-	{Name: "crossplane", Namespace: "crossplane-system", Kind: "crossplane", Phase: "Ready", Labels: map[string]string{"provider": "crossplane"}, Annotations: map[string]string{"description": "Crossplane — infrastructure orchestration"}},
-	{Name: "externalsecrets", Namespace: "external-secrets", Kind: "externalsecrets", Phase: "Ready", Labels: map[string]string{"provider": "externalsecrets"}, Annotations: map[string]string{"description": "External Secrets Operator — secure secret integration"}},
-	{Name: "buildstrategies", Namespace: "shipwright-build", Kind: "buildstrategies", Phase: "Ready", Labels: map[string]string{"provider": "shipwright"}, Annotations: map[string]string{"description": "Shipwright build strategies (buildpacks, kaniko, buildah)"}},
-	{Name: "flux", Namespace: "flux-system", Kind: "flux", Phase: "Ready", Labels: map[string]string{"provider": "flux"}, Annotations: map[string]string{"description": "Flux UI + config"}},
-	{Name: "knative", Namespace: "knative-serving", Kind: "knative", Phase: "Ready", Labels: map[string]string{"provider": "knative"}, Annotations: map[string]string{"description": "Knative Serving — serverless workload runtime"}},
-	{Name: "kourier", Namespace: "kourier-system", Kind: "kourier", Phase: "Ready", Labels: map[string]string{"provider": "kourier"}, Annotations: map[string]string{"description": "Kourier — Knative ingress/networking layer"}},
-}
-
-func isPlatformDependency(kind string) bool {
-	platformDeps := map[string]bool{
-		"carvel": true, "argoevents": true, "tekton-pipelines": true,
-		"tekton-dashboard": true, "shipwright": true, "crossplane": true,
-		"externalsecrets": true, "buildstrategies": true,
-		"flux": true, "knative": true, "kourier": true,
-	}
-	return platformDeps[kind]
-}
-
-func filterPlatformDependencies(kind string) []types.CRStatus {
-	for _, dep := range PlatformDependencies {
-		if dep.Kind == kind {
-			return []types.CRStatus{dep}
-		}
-	}
-	return nil
-}
-
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
