@@ -176,6 +176,49 @@ func (m *MockStore) GetEvents(kind, namespace, name string) ([]types.CREvent, er
 }
 
 func (m *MockStore) seed() error {
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	add := func(kind, name, ns, phase string, spec map[string]interface{}, labels map[string]string) error {
+		specBytes, err := json.Marshal(spec)
+		if err != nil {
+			return err
+		}
+		item := types.CRStatus{
+			Name:        name,
+			Namespace:   ns,
+			Kind:        kind,
+			Phase:       phase,
+			Generation:  1,
+			Conditions: []types.Condition{
+				{Type: "Ready", Status: "True", Reason: "Reconciled", Message: kind + " reconciled", LastTransitionTime: now},
+			},
+			Events: []types.CREvent{
+				{Type: "Normal", Reason: "Created", Message: kind + " created", Count: 1, FirstTime: now, LastTime: now},
+			},
+			Spec:        specBytes,
+			Labels:      labels,
+			Annotations: map[string]string{},
+		}
+		m.data[m.key(kind, ns, name)] = &item
+		return nil
+	}
+
+	contract := func(appName, envType, version, branch, gitOwner, provider string, vault ...map[string]interface{}) map[string]interface{} {
+		ss := map[string]interface{}{"provider": provider}
+		if len(vault) > 0 {
+			ss["vault"] = vault[0]
+		}
+		return map[string]interface{}{
+			"applicationName": appName,
+			"environmentType": envType,
+			"version":         version,
+			"branch":          branch,
+			"gitOwner":        gitOwner,
+			"secretStore":     ss,
+		}
+	}
+
+	// ── Environments ──
 	envs := []struct {
 		name, ns, phase string
 		spec            map[string]interface{}
@@ -183,83 +226,372 @@ func (m *MockStore) seed() error {
 	}{
 		{
 			name: "env-production", ns: "blanketops-environments", phase: "Ready",
-			spec: map[string]interface{}{
-				"contract": map[string]interface{}{
-					"applicationName": "payment-api",
-					"environmentType": "PRODUCTION",
-					"version":         "2.1.0",
-					"branch":          "main",
-					"gitOwner":        "blanketops",
-					"secretStore": map[string]interface{}{
-						"provider": "vault",
-						"vault": map[string]interface{}{
-							"address":   "http://vault:8200",
-							"path":      "secret",
-							"role":      "payments-role",
-							"mountPath": "kubernetes",
-							"version":   "v2",
-						},
-					},
-				},
-			},
+			spec: contract("payment-api", "PRODUCTION", "2.1.0", "main", "blanketops", "vault",
+				map[string]interface{}{
+					"address":   "http://vault:8200",
+					"path":      "secret",
+					"role":      "payments-role",
+					"mountPath": "kubernetes",
+					"version":   "v2",
+				}),
 			labels: map[string]string{"environments.blanketops.dev/name": "env-production", "environments.blanketops.dev/type": "production"},
 		},
 		{
 			name: "env-staging", ns: "blanketops-environments", phase: "Running",
-			spec: map[string]interface{}{
-				"contract": map[string]interface{}{
-					"applicationName": "orders-api",
-					"environmentType": "STAGING",
-					"version":         "1.4.0",
-					"branch":          "develop",
-					"gitOwner":        "blanketops",
-					"secretStore": map[string]interface{}{
-						"provider": "aws",
-					},
-				},
-			},
+			spec: contract("orders-api", "STAGING", "1.4.0", "develop", "blanketops", "aws"),
 			labels: map[string]string{"environments.blanketops.dev/name": "env-staging", "environments.blanketops.dev/type": "staging"},
 		},
 		{
 			name: "env-development", ns: "blanketops-environments", phase: "Pending",
-			spec: map[string]interface{}{
-				"contract": map[string]interface{}{
-					"applicationName": "frontend",
-					"environmentType": "DEVELOPMENT",
-					"version":         "0.9.0",
-					"branch":          "feature/login",
-					"gitOwner":        "blanketops",
-					"secretStore": map[string]interface{}{
-						"provider": "local",
-					},
-				},
-			},
+			spec: contract("frontend", "DEVELOPMENT", "0.9.0", "feature/login", "blanketops", "local"),
 			labels: map[string]string{"environments.blanketops.dev/name": "env-development", "environments.blanketops.dev/type": "development"},
+		},
+		{
+			name: "env-testing", ns: "blanketops-environments", phase: "Failed",
+			spec: contract("auth-service", "TESTING", "0.3.0", "test/sso", "blanketops", "gcp"),
+			labels: map[string]string{"environments.blanketops.dev/name": "env-testing", "environments.blanketops.dev/type": "testing"},
 		},
 	}
 	for _, e := range envs {
-		specBytes, err := json.Marshal(e.spec)
-		if err != nil {
+		if err := add("environments", e.name, e.ns, e.phase, e.spec, e.labels); err != nil {
 			return err
 		}
-		now := time.Now().UTC().Format(time.RFC3339)
-		item := types.CRStatus{
-			Name:        e.name,
-			Namespace:   e.ns,
-			Kind:        "environments",
-			Phase:       e.phase,
-			Generation:  1,
-			Conditions: []types.Condition{
-				{Type: "Ready", Status: "True", Reason: "Reconciled", Message: "Environment reconciled", LastTransitionTime: now},
-			},
-			Events: []types.CREvent{
-				{Type: "Normal", Reason: "Created", Message: "Environment created", Count: 1, FirstTime: now, LastTime: now},
-			},
-			Spec:        specBytes,
-			Labels:      e.labels,
-			Annotations: map[string]string{},
-		}
-		m.data[m.key("environments", e.ns, e.name)] = &item
 	}
+
+	// ── Builds ──
+	builds := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "build-payment-api", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/payment-api:2.1.0",
+				"source": map[string]interface{}{
+					"url":         "https://github.com/blanketops/payment-api.git",
+					"revision":    "main",
+					"contextDir":  "",
+					"cloneSecret": "payment-api-git-ssh",
+				},
+				"strategy": map[string]interface{}{
+					"name": "kaniko", "kind": "ClusterBuildStrategy",
+				},
+				"serviceAccount": map[string]interface{}{"name": "blanketops-sa"},
+				"environmentRef": "env-production",
+				"policy": map[string]interface{}{
+					"allowedTriggers": []interface{}{map[string]interface{}{"type": "github.push"}},
+					"retry":           map[string]interface{}{"onFailure": true, "maxAttempts": 3},
+				},
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "build-orders-api", ns: "blanketops-environments", phase: "Running",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/orders-api:1.4.0",
+				"source": map[string]interface{}{
+					"url":         "https://github.com/blanketops/orders-api.git",
+					"revision":    "develop",
+					"contextDir":  "",
+					"cloneSecret": "orders-api-git-ssh",
+				},
+				"strategy": map[string]interface{}{
+					"name": "buildah", "kind": "ClusterBuildStrategy",
+				},
+				"serviceAccount": map[string]interface{}{"name": "blanketops-sa"},
+				"environmentRef": "env-staging",
+				"policy": map[string]interface{}{
+					"allowedTriggers": []interface{}{map[string]interface{}{"type": "github.push"}},
+					"retry":           map[string]interface{}{"onFailure": true, "maxAttempts": 3},
+				},
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+		{
+			name: "build-frontend", ns: "blanketops-environments", phase: "Pending",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/frontend:0.9.0",
+				"source": map[string]interface{}{
+					"url":         "https://github.com/blanketops/frontend.git",
+					"revision":    "feature/login",
+					"contextDir":  "",
+					"cloneSecret": "frontend-git-ssh",
+				},
+				"strategy": map[string]interface{}{
+					"name": "kaniko", "kind": "ClusterBuildStrategy",
+				},
+				"serviceAccount": map[string]interface{}{"name": "blanketops-sa"},
+				"environmentRef": "env-development",
+				"policy": map[string]interface{}{
+					"allowedTriggers": []interface{}{map[string]interface{}{"type": "github.push"}},
+					"retry":           map[string]interface{}{"onFailure": false},
+				},
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-development"},
+		},
+	}
+	for _, b := range builds {
+		if err := add("builds", b.name, b.ns, b.phase, b.spec, b.labels); err != nil {
+			return err
+		}
+	}
+
+	// ── Packages ──
+	pkgs := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "pkg-cert-manager", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/cert-manager:1.13.0",
+				"source": map[string]interface{}{
+					"url":         "https://github.com/blanketops/cert-manager.git",
+					"revision":    "v1.13.0",
+					"contextDir":  "deploy",
+					"cloneSecret": "cert-manager-git-ssh",
+				},
+				"strategy": map[string]interface{}{"name": "kaniko", "kind": "ClusterBuildStrategy"},
+				"serviceAccount": map[string]interface{}{"name": "blanketops-sa"},
+				"environmentRef": "env-production",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "pkg-ingress-nginx", ns: "blanketops-environments", phase: "Running",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/ingress-nginx:1.9.0",
+				"source": map[string]interface{}{
+					"url":         "https://github.com/blanketops/ingress-nginx.git",
+					"revision":    "main",
+					"contextDir":  "",
+					"cloneSecret": "ingress-git-ssh",
+				},
+				"strategy": map[string]interface{}{"name": "buildah", "kind": "ClusterBuildStrategy"},
+				"serviceAccount": map[string]interface{}{"name": "blanketops-sa"},
+				"environmentRef": "env-staging",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+	}
+	for _, p := range pkgs {
+		if err := add("packages", p.name, p.ns, p.phase, p.spec, p.labels); err != nil {
+			return err
+		}
+	}
+
+	// ── ServiceUnits ──
+	sus := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "svc-payment-worker", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/payment-worker:2.1.0",
+				"replicas": 3,
+				"source": map[string]interface{}{
+					"url":         "https://github.com/blanketops/payment-worker.git",
+					"cloneSecret": "payment-worker-git-ssh",
+				},
+				"strategy": map[string]interface{}{"name": "kaniko", "kind": "ClusterBuildStrategy"},
+				"serviceAccount": map[string]interface{}{"name": "blanketops-sa"},
+				"environmentRef": "env-production",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "svc-order-processor", ns: "blanketops-environments", phase: "Running",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/order-processor:1.4.0",
+				"replicas": 2,
+				"source": map[string]interface{}{
+					"url":         "https://github.com/blanketops/order-processor.git",
+					"cloneSecret": "order-processor-git-ssh",
+				},
+				"strategy": map[string]interface{}{"name": "buildah", "kind": "ClusterBuildStrategy"},
+				"serviceAccount": map[string]interface{}{"name": "blanketops-sa"},
+				"environmentRef": "env-staging",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+	}
+	for _, s := range sus {
+		if err := add("serviceunits", s.name, s.ns, s.phase, s.spec, s.labels); err != nil {
+			return err
+		}
+	}
+
+	// ── Deployments ──
+	deps := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "deploy-payment-api", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/payment-api:2.1.0",
+				"replicas": 2,
+				"strategy": map[string]interface{}{"type": "RollingUpdate"},
+				"environmentRef": "env-production",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "deploy-orders-api", ns: "blanketops-environments", phase: "Running",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/orders-api:1.4.0",
+				"replicas": 3,
+				"strategy": map[string]interface{}{"type": "RollingUpdate"},
+				"environmentRef": "env-staging",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+		{
+			name: "deploy-frontend", ns: "blanketops-environments", phase: "Pending",
+			spec: map[string]interface{}{
+				"image": "ghcr.io/blanketops/frontend:0.9.0",
+				"replicas": 1,
+				"strategy": map[string]interface{}{"type": "Recreate"},
+				"environmentRef": "env-development",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-development"},
+		},
+	}
+	for _, d := range deps {
+		if err := add("deployments", d.name, d.ns, d.phase, d.spec, d.labels); err != nil {
+			return err
+		}
+	}
+
+	// ── GitRepositories ──
+	grs := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "payment-api-repo", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"url": "https://github.com/blanketops/payment-api.git",
+				"revision": "main",
+				"cloneSecret": "payment-api-git-ssh",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "orders-api-repo", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"url": "https://github.com/blanketops/orders-api.git",
+				"revision": "develop",
+				"cloneSecret": "orders-api-git-ssh",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+	}
+	for _, g := range grs {
+		if err := add("gitrepositories", g.name, g.ns, g.phase, g.spec, g.labels); err != nil {
+			return err
+		}
+	}
+
+	// ── GitHubEvents ──
+	ges := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "event-push-payment", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"repository": "blanketops/payment-api",
+				"event":      "push",
+				"branch":     "main",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "event-pull-orders", ns: "blanketops-environments", phase: "Running",
+			spec: map[string]interface{}{
+				"repository": "blanketops/orders-api",
+				"event":      "pull_request",
+				"branch":     "develop",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+	}
+	for _, g := range ges {
+		if err := add("githubevents", g.name, g.ns, g.phase, g.spec, g.labels); err != nil {
+			return err
+		}
+	}
+
+	// ── Routes ──
+	routes := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "route-payment-api", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"path": "/api/payments",
+				"backend": "payment-api-service:8080",
+				"tls": "edge",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "route-orders-api", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"path": "/api/orders",
+				"backend": "orders-api-service:8080",
+				"tls": "edge",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+	}
+	for _, r := range routes {
+		if err := add("routes", r.name, r.ns, r.phase, r.spec, r.labels); err != nil {
+			return err
+		}
+	}
+
+	// ── Domains ──
+	doms := []struct {
+		name, ns, phase string
+		spec            map[string]interface{}
+		labels          map[string]string
+	}{
+		{
+			name: "payments-dev-host", ns: "blanketops-environments", phase: "Ready",
+			spec: map[string]interface{}{
+				"host": "payments.dev.blanketops.dev",
+				"tlsStrategy": "platform",
+				"ref": "env-production",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-production"},
+		},
+		{
+			name: "orders-dev-host", ns: "blanketops-environments", phase: "Provisioning",
+			spec: map[string]interface{}{
+				"host": "orders.dev.blanketops.dev",
+				"tlsStrategy": "custom",
+				"ref": "env-staging",
+			},
+			labels: map[string]string{"environments.blanketops.dev/name": "env-staging"},
+		},
+	}
+	for _, d := range doms {
+		if err := add("domains", d.name, d.ns, d.phase, d.spec, d.labels); err != nil {
+			return err
+		}
+	}
+
+	slog.Info("mock store seeded", "items", len(m.data))
 	return nil
 }
