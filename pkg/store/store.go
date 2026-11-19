@@ -28,4 +28,5 @@ type Store interface {
 	Delete(kind, namespace, name string) (types.DeleteResponse, error)
 	GetEvents(kind, namespace, name string) ([]types.CREvent, error)
 	Logs(pod, namespace, container string, tailLines int64) (string, error)
+	ListPods(namespace string) ([]string, error)
 }

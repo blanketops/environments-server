@@ -193,6 +193,13 @@ func (m *MockStore) Logs(pod, namespace, container string, tailLines int64) (str
 	return sb.String(), nil
 }
 
+// ListPods returns mock pod names for demonstration purposes.
+func (m *MockStore) ListPods(namespace string) ([]string, error) {
+	return []string{
+		"blanketops-environments-controller-manager-86f6977b78-48jdl",
+	}, nil
+}
+
 func (m *MockStore) seed() error {
 	now := time.Now().UTC().Format(time.RFC3339)
 

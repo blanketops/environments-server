@@ -385,6 +385,19 @@ func (s *K8sStore) Logs(pod, namespace, container string, tailLines int64) (stri
 	return buf.String(), nil
 }
 
+// ListPods returns the names of all pods in a namespace.
+func (s *K8sStore) ListPods(namespace string) ([]string, error) {
+	podList, err := s.corev1.CoreV1().Pods(namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods in %s: %w", namespace, err)
+	}
+	names := make([]string, 0, len(podList.Items))
+	for _, p := range podList.Items {
+		names = append(names, p.Name)
+	}
+	return names, nil
+}
+
 // deriveBuildPhase computes a display phase for Build CRs, which carry no
 // status.phase/contract.phase. Their state lives in status.contract (PascalCase
 // fields written by the controller): Success/Triggered/Message. Conditions alone

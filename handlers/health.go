@@ -15,6 +15,7 @@ limitations under the License.
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -35,6 +36,7 @@ func SetupRoutes(s store.Store) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/{kind}", HandleList(s))
 	mux.HandleFunc("POST /api/v1/{kind}", HandleCreate(s))
 	mux.HandleFunc("GET /api/v1/pods/{namespace}/{pod}/logs", HandleLogs(s))
+	mux.HandleFunc("GET /api/v1/pods", HandleListPods(s))
 
 	return mux
 }
@@ -88,6 +90,31 @@ func HandleEvents(s store.Store) http.HandlerFunc {
 			return
 		}
 		helpers.WriteJSON(w, 200, events)
+	}
+}
+
+func HandleListPods(s store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ns := r.URL.Query().Get("namespace")
+		if ns == "" {
+			ns = "blanketops-environments"
+		}
+
+		pods, err := s.ListPods(ns)
+		if err != nil {
+			if se, ok := err.(*store.StoreError); ok {
+				helpers.WriteErr(w, se.HTTPStatus(), se.Message, se.Reason)
+			} else {
+				helpers.WriteErr(w, 500, err.Error(), "InternalServerError")
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(pods); err != nil {
+			slog.Error("encode pods", "err", err)
+		}
 	}
 }
 
