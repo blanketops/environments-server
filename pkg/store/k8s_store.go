@@ -18,17 +18,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/blanketops/environments-server/pkg/types"
+	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
@@ -76,9 +79,11 @@ var GVKMap = map[string]schema.GroupVersionKind{
 	// "githubwebhooks":  {Group: "environments.blanketops.dev", Version: "v1alpha1", Kind: "GitHubWebhook"},  // CRD not installed
 }
 
-// K8sStore uses the Kubernetes dynamic client to interact with CRs.
+// K8sStore uses the Kubernetes dynamic client to interact with CRs,
+// and the corev1 client for pod logs.
 type K8sStore struct {
-	client dynamic.Interface
+	client   dynamic.Interface
+	corev1   kubernetes.Interface
 }
 
 func NewK8sStore(config *rest.Config) (*K8sStore, error) {
@@ -86,7 +91,11 @@ func NewK8sStore(config *rest.Config) (*K8sStore, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create dynamic client: %w", err)
 	}
-	return &K8sStore{client: dynamicClient}, nil
+	corev1Client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create corev1 client: %w", err)
+	}
+	return &K8sStore{client: dynamicClient, corev1: corev1Client}, nil
 }
 
 func (s *K8sStore) isKnown(kind string) bool {
@@ -355,6 +364,25 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 	}
 	slog.Debug("GetEvents: matched events", "count", len(events))
 	return events, nil
+}
+
+// GetLogs returns the last tailLines lines of a container's logs.
+func (s *K8sStore) Logs(pod, namespace, container string, tailLines int64) (string, error) {
+	req := s.corev1.CoreV1().Pods(namespace).GetLogs(pod, &v1.PodLogOptions{
+		Container:  container,
+		TailLines:  &tailLines,
+		Timestamps: true,
+	})
+	stream, err := req.Stream(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("failed to stream logs for %s/%s container %s: %w", namespace, pod, container, err)
+	}
+	defer stream.Close()
+	buf := new(strings.Builder)
+	if _, err := io.Copy(buf, stream); err != nil {
+		return "", fmt.Errorf("failed to read logs for %s/%s container %s: %w", namespace, pod, container, err)
+	}
+	return buf.String(), nil
 }
 
 // deriveBuildPhase computes a display phase for Build CRs, which carry no

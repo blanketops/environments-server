@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -173,6 +174,23 @@ func (m *MockStore) GetEvents(kind, namespace, name string) ([]types.CREvent, er
 		{Type: "Normal", Reason: "Created", Message: "Environment created", Count: 1, FirstTime: now, LastTime: now},
 		{Type: "Normal", Reason: "Reconciled", Message: "Environment reconciled successfully", Count: 1, FirstTime: now, LastTime: now},
 	}, nil
+}
+
+// GetLogs returns mock log lines for demonstration purposes.
+func (m *MockStore) Logs(pod, namespace, container string, tailLines int64) (string, error) {
+	m.mu.RLock()
+	_, ok := m.data[m.key("pods", namespace, pod)]
+	m.mu.RUnlock()
+	if !ok {
+		return "", fmt.Errorf("pod %s/%s not found", namespace, pod)
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Mock logs for pod %s/%s, container %s (last %d lines):\n", namespace, pod, container, tailLines))
+	sb.WriteString("2026/11/19 10:00:00 INFO starting controller\n")
+	sb.WriteString("2026/11/19 10:00:01 INFO connected to kubernetes API\n")
+	sb.WriteString("2026/11/19 10:00:05 INFO reconciler started\n")
+	sb.WriteString("2026/11/19 10:00:10 INFO no resources to reconcile\n")
+	return sb.String(), nil
 }
 
 func (m *MockStore) seed() error {

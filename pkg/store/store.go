@@ -27,4 +27,5 @@ type Store interface {
 	Patch(kind, namespace, name string, body types.PatchBody) (types.CRStatus, error)
 	Delete(kind, namespace, name string) (types.DeleteResponse, error)
 	GetEvents(kind, namespace, name string) ([]types.CREvent, error)
+	Logs(pod, namespace, container string, tailLines int64) (string, error)
 }

@@ -15,6 +15,7 @@ limitations under the License.
 package handlers
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -33,6 +34,7 @@ func SetupRoutes(s store.Store) *http.ServeMux {
 	mux.HandleFunc("DELETE /api/v1/{kind}/{ns}/{name}", HandleDelete(s))
 	mux.HandleFunc("GET /api/v1/{kind}", HandleList(s))
 	mux.HandleFunc("POST /api/v1/{kind}", HandleCreate(s))
+	mux.HandleFunc("GET /api/v1/pods/{namespace}/{pod}/logs", HandleLogs(s))
 
 	return mux
 }
@@ -86,6 +88,37 @@ func HandleEvents(s store.Store) http.HandlerFunc {
 			return
 		}
 		helpers.WriteJSON(w, 200, events)
+	}
+}
+
+func HandleLogs(s store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ns := r.PathValue("namespace")
+		pod := r.PathValue("pod")
+		container := r.URL.Query().Get("container")
+		if container == "" {
+			container = "manager"
+		}
+		tailLines := int64(200)
+		if v := r.URL.Query().Get("tailLines"); v != "" {
+			if n, err := fmt.Sscanf(v, "%d", &tailLines); err != nil || n != 1 {
+				tailLines = 200
+			}
+		}
+
+		logs, err := s.Logs(pod, ns, container, tailLines)
+		if err != nil {
+			if se, ok := err.(*store.StoreError); ok {
+				helpers.WriteErr(w, se.HTTPStatus(), se.Message, se.Reason)
+			} else {
+				helpers.WriteErr(w, 500, err.Error(), "InternalServerError")
+			}
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(logs))
 	}
 }
 
