@@ -32,9 +32,13 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// EventsGVR is the GroupVersionResource for Kubernetes events
+// EventsGVR is the GroupVersionResource for Kubernetes events.
+// Use the core/v1 Events API: its objects expose involvedObject / message /
+// firstTimestamp / lastTimestamp, which is what the matching below reads.
+// (events.k8s.io/v1 renames these to regarding / note / eventTime, so listing
+// there makes the involvedObject.uid match always miss and return no events.)
 var EventsGVR = schema.GroupVersionResource{
-	Group:    "events.k8s.io",
+	Group:    "",
 	Version:  "v1",
 	Resource: "events",
 }
