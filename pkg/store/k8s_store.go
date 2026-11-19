@@ -33,12 +33,17 @@ import (
 )
 
 // EventsGVR is the GroupVersionResource for Kubernetes events.
-// Use the core/v1 Events API: its objects expose involvedObject / message /
-// firstTimestamp / lastTimestamp, which is what the matching below reads.
-// (events.k8s.io/v1 renames these to regarding / note / eventTime, so listing
-// there makes the involvedObject.uid match always miss and return no events.)
+// Use events.k8s.io/v1 (the modern Event API). core/v1 events are deprecated
+// and often unavailable in modern clusters (1.25+); listing them returns
+// nothing even when events exist under events.k8s.io/v1.
+//
+// Field name differences between the two API versions:
+//   core/v1:      involvedObject.uid/name/namespace, type, reason, message,
+//                 count, firstTimestamp, lastTimestamp
+//   events.k8s.io/v1: regarding.uid/name/namespace, type, reason, note,
+//                 count, eventTime, series.lastObservedTime
 var EventsGVR = schema.GroupVersionResource{
-	Group:    "",
+	Group:    "events.k8s.io",
 	Version:  "v1",
 	Resource: "events",
 }
@@ -293,10 +298,13 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 
 	events := make([]types.CREvent, 0)
 	for _, e := range eventList.Items {
-		// Filter by involvedObject UID or name/namespace
-		involvedUID, _, _ := unstructured.NestedString(e.Object, "involvedObject", "uid")
-		involvedName, _, _ := unstructured.NestedString(e.Object, "involvedObject", "name")
-		involvedNamespace, _, _ := unstructured.NestedString(e.Object, "involvedObject", "namespace")
+		// events.k8s.io/v1 uses regarding.* instead of involvedObject.*,
+		// note instead of message, eventTime instead of
+		// firstTimestamp/lastTimestamp, and series.lastObservedTime as a
+		// fallback for the last observed time.
+		involvedUID, _, _ := unstructured.NestedString(e.Object, "regarding", "uid")
+		involvedName, _, _ := unstructured.NestedString(e.Object, "regarding", "name")
+		involvedNamespace, _, _ := unstructured.NestedString(e.Object, "regarding", "namespace")
 
 		slog.Debug("GetEvents: event", "eventName", e.GetName(), "involvedUID", involvedUID, "involvedName", involvedName, "involvedNamespace", involvedNamespace)
 
@@ -318,6 +326,7 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 		if r, found, _ := unstructured.NestedString(e.Object, "reason"); found {
 			evt.Reason = r
 		}
+		// events.k8s.io/v1 uses "note"; core/v1 uses "message". Try both.
 		if m, found, _ := unstructured.NestedString(e.Object, "note"); found {
 			evt.Message = m
 		} else if m, found, _ := unstructured.NestedString(e.Object, "message"); found {
@@ -325,13 +334,19 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 		}
 		if c, found, _ := unstructured.NestedInt64(e.Object, "count"); found {
 			evt.Count = int(c)
+		} else if c, found, _ := unstructured.NestedInt64(e.Object, "series", "count"); found {
+			evt.Count = int(c)
 		}
-		if ft, found, _ := unstructured.NestedString(e.Object, "firstTimestamp"); found {
+		// events.k8s.io/v1: eventTime; series.lastObservedTime as fallback.
+		// core/v1: firstTimestamp / lastTimestamp (kept as fallbacks).
+		if ft, found, _ := unstructured.NestedString(e.Object, "eventTime"); found {
 			evt.FirstTime = ft
-		} else if ft, found, _ := unstructured.NestedString(e.Object, "eventTime"); found {
+		} else if ft, found, _ := unstructured.NestedString(e.Object, "firstTimestamp"); found {
 			evt.FirstTime = ft
 		}
-		if lt, found, _ := unstructured.NestedString(e.Object, "lastTimestamp"); found {
+		if lt, found, _ := unstructured.NestedString(e.Object, "series", "lastObservedTime"); found {
+			evt.LastTime = lt
+		} else if lt, found, _ := unstructured.NestedString(e.Object, "lastTimestamp"); found {
 			evt.LastTime = lt
 		} else if lt, found, _ := unstructured.NestedString(e.Object, "eventTime"); found {
 			evt.LastTime = lt
