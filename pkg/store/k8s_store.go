@@ -45,7 +45,7 @@ var EventsGVR = schema.GroupVersionResource{
 
 // KnownKinds is the complete list of supported CR kinds.
 var KnownKinds = []string{
-	"environments", "builds", "packages",
+	"environments", "builds", "buildruns", "packages",
 	"serviceunits", "deployments", "gitrepositories",
 	"githubevents", "routes", "domains",
 	// "supplychains", "githubwebhooks",  // CRDs not installed
@@ -59,6 +59,7 @@ var KnownKinds = []string{
 var GVKMap = map[string]schema.GroupVersionKind{
 	"environments":    {Group: "environments.blanketops.dev", Version: "v1alpha1", Kind: "Environment"},
 	"builds":          {Group: "environments.blanketops.dev", Version: "v1alpha1", Kind: "Build"},
+	"buildruns":       {Group: "build.knative.dev", Version: "v1alpha1", Kind: "BuildRun"},
 	"packages":        {Group: "environments.blanketops.dev", Version: "v1alpha1", Kind: "Package"},
 	"serviceunits":    {Group: "environments.blanketops.dev", Version: "v1alpha1", Kind: "ServiceUnit"},
 	"deployments":     {Group: "environments.blanketops.dev", Version: "v1alpha1", Kind: "Deployment"},
@@ -341,6 +342,27 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 	return events, nil
 }
 
+// deriveBuildPhase computes a display phase for Build CRs, which carry no
+// status.phase/contract.phase. Their state lives in status.contract (PascalCase
+// fields written by the controller): Success/Triggered/Message. Conditions alone
+// can't distinguish running from failed (BuildStart stays True, BuildFailed stays
+// False after a failed BuildRun), so read the contract fields instead.
+func deriveBuildPhase(obj map[string]interface{}) string {
+	success, _, _ := unstructured.NestedBool(obj, "status", "contract", "Success")
+	triggered, _, _ := unstructured.NestedBool(obj, "status", "contract", "Triggered")
+	msg, _, _ := unstructured.NestedString(obj, "status", "contract", "Message")
+	switch {
+	case success:
+		return "Ready"
+	case triggered && strings.Contains(strings.ToLower(msg), "fail"):
+		return "Failed"
+	case triggered:
+		return "Running"
+	default:
+		return "Pending"
+	}
+}
+
 func (s *K8sStore) unstructuredToCRStatus(u *unstructured.Unstructured, kind string) (types.CRStatus, error) {
 	cr := types.CRStatus{
 		Name:      u.GetName(),
@@ -354,11 +376,16 @@ func (s *K8sStore) unstructuredToCRStatus(u *unstructured.Unstructured, kind str
 		cr.Generation = gen
 	}
 
-	// Extract phase from status
+	// Extract phase from status.
+	// Environments expose status.contract.phase; some kinds use status.phase.
+	// Builds carry neither — their state lives in status.contract
+	// (Success/Triggered/Message) — so derive a display phase for them.
 	if phase, found, _ := unstructured.NestedString(u.Object, "status", "contract", "phase"); found {
 		cr.Phase = phase
 	} else if phase, found, _ := unstructured.NestedString(u.Object, "status", "phase"); found {
 		cr.Phase = phase
+	} else if kind == "builds" {
+		cr.Phase = deriveBuildPhase(u.Object)
 	} else {
 		cr.Phase = "Unknown"
 	}
