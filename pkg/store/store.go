@@ -18,8 +18,7 @@ package store
 import "github.com/blanketops/environments-server/pkg/types"
 
 // Store is the read/write interface for environment CRs.
-// K8sStore (live cluster) and MockStore (offline/demo) both satisfy it.
-// Handlers depend only on this interface so the server can run without a cluster.
+// K8sStore (live cluster) satisfies it.
 type Store interface {
 	List(kind, namespace string) ([]types.CRStatus, error)
 	Get(kind, namespace, name string) (types.CRStatus, error)

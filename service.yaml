@@ -11,8 +11,6 @@ spec:
         env:
         - name: PORT
           value: "8082"
-        - name: MOCK
-          value: "0"
         - name: KUBECONFIG
           value: "/root/.kube/config"
         ports:

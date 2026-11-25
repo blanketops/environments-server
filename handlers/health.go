@@ -38,6 +38,9 @@ func SetupRoutes(s store.Store) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/pods/{namespace}/{pod}/logs", HandleLogs(s))
 	mux.HandleFunc("GET /api/v1/pods", HandleListPods(s))
 
+	// CLI management endpoints
+	RegisterCLIRoutes(mux)
+
 	return mux
 }
 
@@ -57,7 +60,7 @@ func Cors(next http.Handler) http.Handler {
 func HandleHealth(s store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Real connectivity check: try listing environments.
-		// If the store can't reach the backend (k8s or mock), report connected:false.
+		// If the store can't reach the backend, report connected:false.
 		_, err := s.List("environments", "")
 		connected := err == nil
 

@@ -113,6 +113,7 @@ func (s *K8sStore) gvr(kind string) schema.GroupVersionResource {
 }
 
 func (s *K8sStore) List(kind, namespace string) ([]types.CRStatus, error) {
+	slog.Debug("List called", "kind", kind, "namespace", namespace)
 	if !s.isKnown(kind) {
 		return nil, storeErr(400, fmt.Sprintf("unknown kind: %s", kind), "BadRequest")
 	}
@@ -131,8 +132,10 @@ func (s *K8sStore) List(kind, namespace string) ([]types.CRStatus, error) {
 		return nil, storeErr(500, err.Error(), "InternalServerError")
 	}
 	slog.Debug("list result", "items_count", len(list.Items))
+        slog.Debug("list.Items type", "type", fmt.Sprintf("%T", list.Items), "len", len(list.Items), "nil?", list.Items == nil)
 
 	items := make([]types.CRStatus, 0, len(list.Items))
+        slog.Debug("items slice created", "items", items, "len", len(items), "cap", cap(items), "nil?", items == nil)
 	for _, u := range list.Items {
 		item, err := s.unstructuredToCRStatus(&u, kind)
 		if err != nil {
@@ -140,6 +143,7 @@ func (s *K8sStore) List(kind, namespace string) ([]types.CRStatus, error) {
 		}
 		items = append(items, item)
 	}
+        slog.Debug("List returning", "items", items, "len", len(items), "nil?", items == nil)
 	return items, nil
 }
 
@@ -283,16 +287,7 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 		return nil, storeErr(404, fmt.Sprintf("%s/%s not found", kind, name), "NotFound")
 	}
 
-	// List all events in the namespace and filter client-side
-	// Field selectors on events.k8s.io/v1 are not consistently supported
-	eventList, err := s.client.Resource(EventsGVR).Namespace(namespace).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		slog.Error("failed to list events", "err", err)
-		return nil, storeErr(500, err.Error(), "InternalServerError")
-	}
-	slog.Debug("GetEvents: listed events", "namespace", namespace, "count", len(eventList.Items))
-
-	// Get the resource UID for filtering
+	// Get the resource UID and GVK for filtering
 	gvr := s.gvr(kind)
 	u, err := s.client.Resource(gvr).Namespace(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	if err != nil {
@@ -303,24 +298,44 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 	}
 
 	uid := string(u.GetUID())
-	slog.Debug("GetEvents: resource", "kind", kind, "name", name, "namespace", namespace, "uid", uid)
+	gvk := GVKMap[kind]
+	apiVersion := gvk.GroupVersion().String()
+	resourceKind := gvk.Kind
+
+	slog.Debug("GetEvents: resource", "kind", kind, "name", name, "namespace", namespace, "uid", uid, "apiVersion", apiVersion, "resourceKind", resourceKind)
+
+	// List events in the namespace and filter client-side
+	// Field selectors on events.k8s.io/v1 are not consistently supported
+	eventList, err := s.client.Resource(EventsGVR).Namespace(namespace).List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		slog.Error("failed to list events", "err", err)
+		return nil, storeErr(500, err.Error(), "InternalServerError")
+	}
+	slog.Debug("GetEvents: listed events", "namespace", namespace, "count", len(eventList.Items))
 
 	events := make([]types.CREvent, 0)
 	for _, e := range eventList.Items {
-		// events.k8s.io/v1 uses regarding.* instead of involvedObject.*,
-		// note instead of message, eventTime instead of
-		// firstTimestamp/lastTimestamp, and series.lastObservedTime as a
-		// fallback for the last observed time.
-		involvedUID, _, _ := unstructured.NestedString(e.Object, "regarding", "uid")
-		involvedName, _, _ := unstructured.NestedString(e.Object, "regarding", "name")
-		involvedNamespace, _, _ := unstructured.NestedString(e.Object, "regarding", "namespace")
+		// events.k8s.io/v1 uses regarding.*; core/v1 uses involvedObject.*
+		// Try both for maximum compatibility.
+		involvedUID := extractString(e.Object, "regarding", "uid", "involvedObject", "uid")
+		involvedName := extractString(e.Object, "regarding", "name", "involvedObject", "name")
+		involvedNamespace := extractString(e.Object, "regarding", "namespace", "involvedObject", "namespace")
+		involvedKind := extractString(e.Object, "regarding", "kind", "involvedObject", "kind")
+		involvedAPIVersion := extractString(e.Object, "regarding", "apiVersion", "involvedObject", "apiVersion")
 
-		slog.Debug("GetEvents: event", "eventName", e.GetName(), "involvedUID", involvedUID, "involvedName", involvedName, "involvedNamespace", involvedNamespace)
+		slog.Debug("GetEvents: event", "eventName", e.GetName(), "involvedUID", involvedUID, "involvedName", involvedName, "involvedNamespace", involvedNamespace, "involvedKind", involvedKind)
 
 		match := false
+		// Primary match: UID (most precise)
 		if uid != "" && involvedUID == uid {
 			match = true
-		} else if involvedName == name && involvedNamespace == namespace {
+		}
+		// Fallback: name + namespace + kind (handles old API events without UID)
+		if !match && involvedName == name && involvedNamespace == namespace && involvedKind == resourceKind {
+			match = true
+		}
+		// Additional fallback: name + namespace + apiVersion (for cross-group resources)
+		if !match && involvedName == name && involvedNamespace == namespace && involvedAPIVersion == apiVersion {
 			match = true
 		}
 
@@ -364,6 +379,19 @@ func (s *K8sStore) GetEvents(kind, namespace, name string) ([]types.CREvent, err
 	}
 	slog.Debug("GetEvents: matched events", "count", len(events))
 	return events, nil
+}
+
+// extractString tries multiple nested paths and returns the first non-empty value.
+func extractString(obj map[string]interface{}, paths ...string) string {
+	for i := 0; i < len(paths); i += 2 {
+		if i+1 >= len(paths) {
+			break
+		}
+		if val, found, _ := unstructured.NestedString(obj, paths[i], paths[i+1]); found && val != "" {
+			return val
+		}
+	}
+	return ""
 }
 
 // GetLogs returns the last tailLines lines of a container's logs.
