@@ -54,7 +54,7 @@ env:
 jobs:
   build-and-publish:
     #  self-hosted pool.
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
