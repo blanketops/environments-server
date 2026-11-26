@@ -65,7 +65,7 @@ permissions:
 jobs:
   finalize:
     #  self-hosted pool.
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
       VERSION: ${{ github.event.inputs.version }}
     steps:
